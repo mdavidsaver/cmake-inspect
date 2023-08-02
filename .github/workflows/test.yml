@@ -1,0 +1,82 @@
+name: CMake Inspection
+
+on: [push, pull_request]
+
+defaults:
+    run:
+        shell: bash
+
+jobs:
+    test:
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                - os: ubuntu-latest
+
+                - os: macos-latest
+                # with cmake policies CMP0042 and CMP0068 set to NEW, the implied default is
+                # config: "-DCMAKE_MACOSX_RPATH=ON -DCMAKE_SKIP_INSTALL_RPATH=OFF"
+
+                - os: macos-latest
+                  config: "-DCMAKE_MACOSX_RPATH=OFF -DCMAKE_SKIP_INSTALL_RPATH=ON -DCMAKE_INSTALL_NAME_DIR=\"$PWD/usr/lib\""
+
+                # not sure what is going wrong...
+                #  LINK : fatal error LNK1104: cannot open file 'Debug\dummy.lib'
+                #- os: windows-latest
+
+                - os: windows-latest
+                  config: "-G \"MinGW Makefiles\""
+
+        steps:
+        - uses: actions/checkout@v3
+
+        - name: Host Info
+          run: |
+            set -x
+            cmake --version
+            cmake --help
+            gcc --version
+            make --version
+
+        - name: System Information
+          run: cmake --system-information
+
+        - name: Configure
+          run: >
+            cmake
+            --debug-output
+            -B build -S .
+            -DCMAKE_INSTALL_PREFIX="$PWD/usr"
+            -DCMAKE_VERBOSE_MAKEFILE=ON
+            ${{ matrix.config }}
+
+        - name: CMakeCache.txt
+          run: cat build/CMakeCache.txt
+
+        - name: cmake_install.cmake
+          run: cat build/cmake_install.cmake
+
+        - name: Build + Install
+          run: cmake --build build --target install -- ${{ matrix.build }}
+
+        - name: Listing
+          if: ${{ always() }}
+          run: ls -lR build usr || true
+
+        - name: readelf
+          if: ${{ runner.os == 'Linux' }}
+          run: readelf -d usr/bin/* usr/lib/*.so
+
+        - name: otool
+          if: ${{ runner.os == 'macOS' }}
+          run: otool -D -L -l usr/bin/* usr/lib/*.dylib
+
+        - name: Run
+          env:
+          # Linux: "man ld.so"
+            LD_DEBUG: "all"
+          # OSX: "man dyld"
+            DYLD_PRINT_RPATHS: "1"
+          run: ./usr/bin/testmain
